@@ -1,0 +1,26 @@
+# Entorno virtual y cache de Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Variables de entorno y credenciales (NUNCA subir al repositorio)
+.env
+*.env
+!.env.example
+*firebase*.json
+*serviceAccount*.json
+*-credentials.json
+secrets/
+
+# Firebase CLI / emulador
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Editores y sistema
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db

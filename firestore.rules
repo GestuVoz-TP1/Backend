@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Solo el backend Django accede a Cloud Firestore (OB2). El SDK de
+// administracion no pasa por estas reglas; cualquier acceso directo desde
+// clientes queda denegado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
