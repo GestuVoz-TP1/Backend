@@ -18,3 +18,5 @@ services:
       # Pegar el contenido del JSON de la cuenta de servicio en el panel de Render.
       - key: FIREBASE_CREDENTIALS_JSON
         sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        value: gestuvoz.firebasestorage.app
