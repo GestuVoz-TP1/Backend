@@ -37,6 +37,24 @@ class StaleWrite(APIException):
         self.current = current
 
 
+class StorageUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = "El almacenamiento de imágenes no está disponible."
+    default_code = "almacenamiento_no_disponible"
+
+
+class InvalidImage(APIException):
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_detail = "La imagen debe ser JPG, PNG o WebP."
+    default_code = "imagen_invalida"
+
+
+class ImageTooLarge(APIException):
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    default_detail = "La imagen no puede superar los 500 KB."
+    default_code = "imagen_muy_grande"
+
+
 def exception_handler(exc, context):
     response = drf_exception_handler(exc, context)
     if response is None:

@@ -7,6 +7,7 @@ Las vistas solo validan y delegan en `GestuVozService`.
 
 from __future__ import annotations
 
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -26,7 +27,9 @@ from .services import GestuVozService
 
 
 def _service(request) -> GestuVozService:
-    return GestuVozService(firebase.get_store(), request.user.uid)
+    return GestuVozService(
+        firebase.get_store(), request.user.uid, files=firebase.get_file_store
+    )
 
 
 def _valid(serializer_cls, data):
@@ -142,6 +145,35 @@ class PictogramaView(APIView):
     def delete(self, request, id_pictograma):
         _service(request).delete_pictogram(validate_id(id_pictograma))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PictogramaImagenView(APIView):
+    """Imagen de un pictograma personalizado (Cloud Storage).
+
+    PUT recibe los bytes de la imagen en el cuerpo (JPG, PNG o WebP, hasta
+    500 KB) y requiere ?id_perfil=... para verificar el consentimiento.
+    """
+
+    def put(self, request, id_pictograma):
+        id_perfil = request.query_params.get("id_perfil", "")
+        return Response(
+            _service(request).put_pictogram_image(
+                validate_id(id_pictograma), validate_id(id_perfil), request.body
+            )
+        )
+
+    def get(self, request, id_pictograma):
+        data, content_type = _service(request).get_pictogram_image(
+            validate_id(id_pictograma)
+        )
+        response = HttpResponse(data, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=86400"
+        return response
+
+    def delete(self, request, id_pictograma):
+        return Response(
+            _service(request).delete_pictogram_image(validate_id(id_pictograma))
+        )
 
 
 class IntencionesView(APIView):

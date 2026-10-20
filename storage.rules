@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Solo el backend Django accede a Cloud Storage (OB2). El SDK de
+// administracion no pasa por estas reglas; cualquier acceso directo desde
+// clientes queda denegado.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

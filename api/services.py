@@ -10,17 +10,21 @@ Reglas:
 - Gana el ultimo cambio: se rechaza una version mas antigua que la guardada.
 - Interacciones: se crean una sola vez (reenvios sin conexion no duplican).
 - HU025: eliminar un perfil borra sus datos en la nube.
+- Imagenes de pictogramas (Cloud Storage): solo JPG, PNG o WebP de hasta
+  500 KB; la ruta se guarda en `referencia_imagen`.
 """
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Callable
 
 from rest_framework.exceptions import ValidationError
 
 from . import reports
-from .errors import ConsentRequired, NotFound, StaleWrite
+from .errors import ConsentRequired, ImageTooLarge, InvalidImage, NotFound, StaleWrite
+from .files import FileStore
 from .store import DocumentStore, Filter
 
 # Colecciones de Cloud Firestore (OB2, Figura 7) + `ninos`.
@@ -48,10 +52,31 @@ def _out(value: Any) -> Any:
     return value
 
 
+MAX_IMAGEN_BYTES = 500 * 1024
+
+
+def image_type(data: bytes) -> str | None:
+    """Tipo de imagen segun su contenido (no se confia en la extension)."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 class GestuVozService:
-    def __init__(self, store: DocumentStore, tutor_uid: str):
+    def __init__(
+        self,
+        store: DocumentStore,
+        tutor_uid: str,
+        files: Callable[[], FileStore] | None = None,
+    ):
         self.store = store
         self.uid = tutor_uid
+        # Se obtiene solo cuando se usa: sin imagenes no hace falta Storage.
+        self._files = files
 
     # ------------------------------------------------------------------
     # Pertenencia y consentimiento
@@ -224,17 +249,76 @@ class GestuVozService:
             "nombre": data["nombre"],
             "mensaje": data["mensaje"],
             "id_categoria": data["id_categoria"],
-            "referencia_imagen": data.get("referencia_imagen") or None,
+            # La referencia solo cambia al subir o borrar la imagen.
+            "referencia_imagen": stored.get("referencia_imagen") if stored else None,
             "id_tutor": self.uid,
             TS: data[TS],
         }
         return _out(self._put(PICTOGRAMAS, id_pictograma, doc, _out))
 
     def delete_pictogram(self, id_pictograma: str) -> None:
+        stored = self._owned_pictogram(id_pictograma)
+        self.store.delete_many([(PICTOGRAMAS, id_pictograma)])
+        if stored.get("referencia_imagen"):
+            self._file_store().delete(stored["referencia_imagen"])
+
+    # ------------------------------------------------------------------
+    # Imagenes de pictogramas personalizados (HU012, HU013)
+    # Cloud Storage for Firebase; la ruta queda en `referencia_imagen`.
+    # ------------------------------------------------------------------
+    def _owned_pictogram(self, id_pictograma: str) -> dict:
         stored = self.store.get(PICTOGRAMAS, id_pictograma)
         if stored is None or stored.get("id_tutor") != self.uid:
             raise NotFound()
-        self.store.delete_many([(PICTOGRAMAS, id_pictograma)])
+        return stored
+
+    def _file_store(self) -> FileStore:
+        if self._files is None:
+            raise RuntimeError("Almacenamiento de archivos no configurado.")
+        return self._files()
+
+    def _set_image_ref(self, stored: dict, ref: str | None) -> dict:
+        doc = {**stored, "referencia_imagen": ref}
+        # Misma fecha: la referencia no compite con las ediciones de la app.
+        return self.store.put_if_newer(PICTOGRAMAS, stored["id_pictograma"], doc, TS).current
+
+    def put_pictogram_image(
+        self, id_pictograma: str, id_perfil: str, data: bytes
+    ) -> dict:
+        self._existing_profile(id_perfil)
+        self._require_consent(id_perfil)
+        stored = self._owned_pictogram(id_pictograma)
+        if len(data) > MAX_IMAGEN_BYTES:
+            raise ImageTooLarge()
+        content_type = image_type(data)
+        if content_type is None:
+            raise InvalidImage()
+        # La ruta cambia con el contenido: la app sabe cuando volver a descargarla.
+        digest = hashlib.sha256(data).hexdigest()[:16]
+        ref = f"pictogramas/{self.uid}/{id_pictograma}/{digest}"
+        previous = stored.get("referencia_imagen")
+        if previous != ref:
+            self._file_store().put(ref, data, content_type)
+            stored = self._set_image_ref(stored, ref)
+            if previous:
+                self._file_store().delete(previous)
+        return _out(stored)
+
+    def get_pictogram_image(self, id_pictograma: str) -> tuple[bytes, str]:
+        stored = self._owned_pictogram(id_pictograma)
+        ref = stored.get("referencia_imagen")
+        found = self._file_store().get(ref) if ref else None
+        if found is None:
+            raise NotFound("El pictograma no tiene imagen.")
+        return found
+
+    def delete_pictogram_image(self, id_pictograma: str) -> dict:
+        stored = self._owned_pictogram(id_pictograma)
+        ref = stored.get("referencia_imagen")
+        if ref:
+            stored = self._set_image_ref(stored, None)
+            self._file_store().delete(ref)
+        return _out(stored)
 
     # ------------------------------------------------------------------
     # Intenciones comunicativas (catalogo)

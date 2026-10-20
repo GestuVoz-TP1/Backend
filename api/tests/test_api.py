@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIClient
 
 from api import firebase
 from api.catalog import INTENCIONES_INICIALES
+from api.files import InMemoryFileStore
 from api.services import CONSENTIMIENTOS, INTERACCIONES, NINOS, PERFILES, VOZ
 from api.store import InMemoryStore
 
@@ -80,11 +81,14 @@ class ApiTestCase(SimpleTestCase):
     def setUp(self):
         self.store = InMemoryStore()
         firebase.set_store(self.store)
+        self.files = InMemoryFileStore()
+        firebase.set_file_store(self.files)
         firebase.set_token_verifier(fake_verifier)
         self.client = self.client_for("tutor1")
 
     def tearDown(self):
         firebase.set_store(None)
+        firebase.set_file_store(None)
         firebase.set_token_verifier(None)
 
     @staticmethod
@@ -349,3 +353,102 @@ class PictogramasEIntencionesTests(ApiTestCase):
         self.assertEqual([i["id_intencion"] for i in r],
                          ["intencion-1", "intencion-2", "intencion-3", "intencion-4"])
         self.assertEqual(r[1]["mensaje_asociado"], "Quiero agua")
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+JPG = b"\xff\xd8\xff\xe0" + b"\x01" * 64
+
+
+class ImagenesPictogramaTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.id_perfil, _ = self.create_profile()
+        self.id_picto = str(uuid.uuid4())
+        self.picto = {"nombre": "Mi osito", "mensaje": "Quiero mi osito",
+                      "id_categoria": 2, "actualizado_en": iso(NOW)}
+        r = self.client.put(
+            f"{BASE}/pictogramas/{self.id_picto}?id_perfil={self.id_perfil}",
+            self.picto, format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.url = f"{BASE}/pictogramas/{self.id_picto}/imagen"
+
+    def subir(self, data: bytes, client=None, id_perfil=None):
+        return (client or self.client).put(
+            f"{self.url}?id_perfil={id_perfil or self.id_perfil}",
+            data=data, content_type="application/octet-stream",
+        )
+
+    def test_subir_descargar_y_reemplazar(self):
+        r = self.subir(PNG)
+        self.assertEqual(r.status_code, 200, r.content)
+        ref = r.json()["referencia_imagen"]
+        self.assertTrue(ref.startswith(f"pictogramas/tutor1/{self.id_picto}/"))
+        img = self.client.get(self.url)
+        self.assertEqual(img.status_code, 200)
+        self.assertEqual(img["Content-Type"], "image/png")
+        self.assertEqual(img.content, PNG)
+        # Editar el pictograma desde la app no borra la referencia.
+        r = self.client.put(
+            f"{BASE}/pictogramas/{self.id_picto}?id_perfil={self.id_perfil}",
+            {**self.picto, "referencia_imagen": None,
+             "actualizado_en": iso(NOW + timedelta(minutes=1))},
+            format="json",
+        )
+        self.assertEqual(r.json()["referencia_imagen"], ref)
+        # Una imagen nueva cambia la ruta y borra la anterior.
+        nueva = self.subir(JPG).json()["referencia_imagen"]
+        self.assertNotEqual(nueva, ref)
+        self.assertEqual(self.files.paths(), [nueva])
+        self.assertEqual(self.client.get(self.url)["Content-Type"], "image/jpeg")
+
+    def test_validaciones(self):
+        self.assertEqual(self.subir(b"no es una imagen").status_code, 400)
+        grande = PNG + b"\x00" * (500 * 1024)
+        r = self.subir(grande)
+        self.assertEqual(r.status_code, 413)
+        self.assertEqual(r.json()["error"]["codigo"], "imagen_muy_grande")
+        self.assertEqual(self.files.paths(), [])
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_otro_tutor_no_accede(self):
+        self.subir(PNG)
+        otro = self.client_for("tutor2")
+        perfil_otro, _ = self.create_profile(client=otro)
+        self.assertEqual(self.subir(PNG, client=otro, id_perfil=perfil_otro).status_code, 404)
+        self.assertEqual(otro.get(self.url).status_code, 404)
+        self.assertEqual(otro.delete(self.url).status_code, 404)
+
+    def test_requiere_consentimiento(self):
+        self.client.put(
+            f"{BASE}/perfiles/{self.id_perfil}/consentimiento",
+            consent_payload("retirado", ts=NOW + timedelta(minutes=1),
+                            retiro=NOW + timedelta(minutes=1)),
+            format="json",
+        )
+        r = self.subir(PNG)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["error"]["codigo"], "consentimiento_requerido")
+
+    def test_borrar_imagen_y_pictograma(self):
+        self.subir(PNG)
+        r = self.client.delete(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["referencia_imagen"])
+        self.assertEqual(self.files.paths(), [])
+        self.subir(PNG)
+        self.assertEqual(
+            self.client.delete(f"{BASE}/pictogramas/{self.id_picto}").status_code, 204
+        )
+        self.assertEqual(self.files.paths(), [])
+
+    @override_settings(FIREBASE_STORAGE_BUCKET="")
+    def test_sin_bucket_configurado(self):
+        firebase.set_file_store(None)
+        r = self.subir(PNG)
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.json()["error"]["codigo"], "almacenamiento_no_disponible")
+        # Sin imagen, los pictogramas siguen funcionando.
+        self.assertEqual(
+            self.client.delete(f"{BASE}/pictogramas/{self.id_picto}").status_code, 204
+        )

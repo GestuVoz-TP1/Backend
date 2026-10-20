@@ -129,7 +129,8 @@ class PictogramaSerializer(serializers.Serializer):
     nombre = serializers.CharField(max_length=150)
     mensaje = serializers.CharField(max_length=500)
     id_categoria = serializers.IntegerField(min_value=1)
-    # Cloud Storage aun no esta activo: la imagen queda en el dispositivo.
+    # La gestiona el backend al subir la imagen (PUT .../imagen); el valor
+    # que envie la app se ignora.
     referencia_imagen = serializers.CharField(
         max_length=500, required=False, allow_null=True, allow_blank=True
     )

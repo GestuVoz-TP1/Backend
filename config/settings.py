@@ -92,6 +92,8 @@ REST_FRAMEWORK = {
 FIREBASE_CREDENTIALS_FILE = os.environ.get("FIREBASE_CREDENTIALS_FILE", "")
 FIREBASE_CREDENTIALS_JSON = os.environ.get("FIREBASE_CREDENTIALS_JSON", "")
 FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "gestuvoz")
+# Cloud Storage for Firebase: imagenes de los pictogramas personalizados.
+FIREBASE_STORAGE_BUCKET = os.environ.get("FIREBASE_STORAGE_BUCKET", "")
 
 # Seguridad en produccion (HTTPS, OB2 9.1).
 if not DEBUG:

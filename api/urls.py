@@ -26,5 +26,9 @@ urlpatterns = [
     path("perfiles/<str:id_perfil>/reportes", views.ReporteView.as_view()),
     path("pictogramas", views.PictogramasView.as_view()),
     path("pictogramas/<str:id_pictograma>", views.PictogramaView.as_view()),
+    path(
+        "pictogramas/<str:id_pictograma>/imagen",
+        views.PictogramaImagenView.as_view(),
+    ),
     path("intenciones", views.IntencionesView.as_view()),
 ]
