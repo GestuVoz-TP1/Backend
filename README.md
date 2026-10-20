@@ -5,7 +5,8 @@ machine learning para apoyar la comunicación no verbal de niños con TEA en Lim
 Metropolitana**.
 
 Recibe los datos que la app móvil sincroniza, los guarda en **Cloud Firestore**
-y genera los reportes de uso. La autenticación de padres o tutores la hace
+(y las imágenes de los pictogramas personalizados en **Cloud Storage for
+Firebase**) y genera los reportes de uso. La autenticación de padres o tutores la hace
 **Firebase Authentication**.
 
 ```
@@ -16,7 +17,7 @@ App móvil (Flutter) ──login──► Firebase Authentication
                          Backend Django (este repositorio)
                                        │ Firebase Admin SDK
                                        ▼
-                                Cloud Firestore
+                    Cloud Firestore · Cloud Storage for Firebase
 ```
 
 ---
@@ -70,9 +71,11 @@ App móvil (Flutter) ──login──► Firebase Authentication
   | Gesto | `gesto-<id local>` |
   | Intención | `intencion-<id local>` |
 
-- Las imágenes de los pictogramas personalizados se guardarán en Cloud Storage
-  cuando se active; mientras tanto `referencia_imagen` queda vacía y la imagen
-  permanece en el teléfono.
+- Las imágenes de los pictogramas personalizados se guardan en **Cloud
+  Storage** (`gestuvoz.firebasestorage.app`, región `US-EAST1`) en la ruta
+  `pictogramas/<id_tutor>/<id_pictograma>/<huella>`. Esa ruta queda en
+  `referencia_imagen` y solo la modifica el backend; cambia cuando cambia la
+  imagen, así la app sabe cuándo volver a descargarla.
 
 ---
 
@@ -116,7 +119,8 @@ Authorization: Bearer <ID token de Firebase>
 | GET | `perfiles/{id_perfil}/interacciones/{id}` | Detalle de una interacción |
 | GET | `perfiles/{id_perfil}/reportes` | Resumen, actividad semanal y más frecuentes (`?desde&hasta`) |
 | GET | `pictogramas` | Pictogramas personalizados del tutor |
-| PUT · DELETE | `pictogramas/{id_pictograma}` | Crear o actualizar (`?id_perfil=...`) · eliminar |
+| PUT · DELETE | `pictogramas/{id_pictograma}` | Crear o actualizar (`?id_perfil=...`) · eliminar (también borra su imagen) |
+| GET · PUT · DELETE | `pictogramas/{id_pictograma}/imagen` | Descargar · subir los bytes de la imagen (`?id_perfil=...`; JPG, PNG o WebP, hasta 500 KB) · quitar la imagen |
 | GET | `intenciones` | Catálogo de intenciones comunicativas |
 
 Orden recomendado al crear un perfil desde la app: **1)** `PUT .../consentimiento`
@@ -187,7 +191,8 @@ El archivo `render.yaml` define el servicio. En el panel de Render:
 1. **New → Blueprint** y seleccionar este repositorio.
 2. En la variable `FIREBASE_CREDENTIALS_JSON`, pegar el **contenido** del JSON
    de la cuenta de servicio.
-3. Desplegar y comprobar `https://<servicio>.onrender.com/api/v1/salud`.
+3. Definir `FIREBASE_STORAGE_BUCKET=gestuvoz.firebasestorage.app`.
+4. Desplegar y comprobar `https://<servicio>.onrender.com/api/v1/salud`.
 
 En el plan gratuito el servicio se suspende tras 15 minutos sin uso y la
 primera petición tarda alrededor de un minuto.
@@ -199,8 +204,12 @@ primera petición tarda alrededor de un minuto.
 - La credencial de Firebase **nunca** se sube al repositorio (`.gitignore`) y
   se carga desde variables de entorno.
 - En producción: HTTPS obligatorio, HSTS y `DEBUG` desactivado.
-- `firestore.rules` niega todo acceso directo a Firestore desde clientes; solo
-  el backend accede con la cuenta de servicio.
+- `firestore.rules` y `storage.rules` niegan todo acceso directo a Firestore y
+  a Cloud Storage desde clientes; solo el backend accede con la cuenta de
+  servicio.
+- Las imágenes se validan por su contenido (no por la extensión) y se limitan
+  a 500 KB; solo el tutor dueño del pictograma puede subirlas o descargarlas,
+  y subirlas requiere el consentimiento vigente del perfil.
 - El token de Firebase se verifica en cada petición, incluida su revocación.
 
 ---
