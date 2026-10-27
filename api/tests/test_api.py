@@ -351,7 +351,7 @@ class PictogramasEIntencionesTests(ApiTestCase):
             )
         r = self.client.get(f"{BASE}/intenciones").json()
         self.assertEqual([i["id_intencion"] for i in r],
-                         ["intencion-1", "intencion-2", "intencion-3", "intencion-4"])
+                         [f"intencion-{n}" for n in range(1, 12)])
         self.assertEqual(r[1]["mensaje_asociado"], "Quiero agua")
 
 

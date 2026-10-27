@@ -17,6 +17,7 @@ Reglas:
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import date, datetime
 from typing import Any, Callable
 
@@ -325,7 +326,9 @@ class GestuVozService:
     # ------------------------------------------------------------------
     def list_intentions(self) -> list[dict]:
         docs = self.store.query(INTENCIONES, [])
-        docs.sort(key=lambda d: d.get("id_intencion", ""))
+        # Orden numerico: "intencion-2" antes que "intencion-10".
+        docs.sort(key=lambda d: [int(t) if t.isdigit() else t
+                                 for t in re.split(r"(\d+)", d.get("id_intencion", ""))])
         return _out(docs)
 
     # ------------------------------------------------------------------
